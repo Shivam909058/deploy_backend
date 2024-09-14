@@ -13,9 +13,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
     
+from flask import Flask, request, jsonify
+from flask_cors import CORS
 app = Flask(__name__)
-CORS(app)
-
+CORS(app, resources={r"/*": {"origins": "*"}})  # Allow all origins for all routes
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
 llm = ChatOpenAI(model_name="gpt-4o", temperature=0.7, openai_api_key=OPENAI_API_KEY)
@@ -41,16 +42,34 @@ def update_vector_store(text):
     else:
         vector_store.add_texts(chunks)
 
-@app.route('/process_transcription', methods=['POST'])
+@app.route('/process_transcription', methods=['POST', 'OPTIONS'])
 def process_transcription():
-    url = request.json.get('url')
-    if not url:
-        return jsonify({"error": "No URL provided"}), 400
-    
-    transcription_text = process_jsonl(url)
-    update_vector_store(transcription_text)
-    return jsonify({"message": "Transcription processed successfully",
-                    "transcription_text": transcription_text}), 200
+    if request.method == "OPTIONS":
+        return _build_cors_preflight_response()
+    elif request.method == "POST":
+        url = request.json.get('url')
+        if not url:
+            return jsonify({"error": "No URL provided"}), 400
+        
+        transcription_text = process_jsonl(url)
+        update_vector_store(transcription_text)
+        return _corsify_actual_response(jsonify({"message": "Transcription processed successfully",
+                        "transcription_text": transcription_text}))
+    else:
+        raise RuntimeError("Weird - don't know how to handle method {}".format(request.method))
+
+def _build_cors_preflight_response():
+    response = make_response()
+    response.headers.add("Access-Control-Allow-Origin", "*")
+    response.headers.add('Access-Control-Allow-Headers', "*")
+    response.headers.add('Access-Control-Allow-Methods', "*")
+    return response
+
+def _corsify_actual_response(response):
+    response.headers.add("Access-Control-Allow-Origin", "*")
+    return response
+
+
 
 @app.route('/chat', methods=['POST'])
 def chat():
